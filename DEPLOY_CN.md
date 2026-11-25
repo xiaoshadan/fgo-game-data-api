@@ -1,5 +1,9 @@
 # CN API Docker 部署手册
 
+> 国内网络注意：构建所需的所有下载源（基础镜像 / apt / pip）已在 [`Dockerfile`](/Dockerfile) 内置国内镜像源，无需额外配置。若某个镜像源不可用，见第 0.1 节替换。
+
+> 国内网络注意：如果 `docker.io` 被墙（构建时报 `403 Forbidden`），见第 0.1 节的镜像源配置。
+
 在 Linux 服务器上用 Docker 部署一个自托管的 CN 区 FGO game data API。
 API 镜像在服务器上本地 `docker build`，不依赖任何 CI workflow。
 
@@ -9,6 +13,53 @@ API 镜像在服务器上本地 `docker build`，不依赖任何 CI workflow。
 - 内存 ≥ 4 GB（首次导入 CN 数据 + 构建 PGroonga 全文索引峰值约 2~4 GB）
 - 磁盘 ≥ 10 GB（gamedata 仓库 + Postgres 数据卷）
 - 可访问外网：`git.atlasacademy.io`（gamedata 仓库）、`assets.atlasacademy.io`（asset manifest）、PyPI（构建镜像时装依赖）
+
+## 0.1 国内网络：构建下载源配置
+
+构建镜像时有三类下载源，[`Dockerfile`](/Dockerfile) 已全部内置国内镜像源，默认无需任何配置：
+
+| 下载内容 | 默认镜像源 | 构建参数 |
+| --- | --- | --- |
+| 基础镜像 `python:3.13-slim-bookworm` | DaoCloud（docker.io 镜像） | `BASE_IMAGE` |
+| Debian apt 包（git、libpq5） | 中科大 USTC（deb.debian.org 镜像） | `APT_MIRROR` |
+| Python 依赖（pip install） | 清华 TUNA PyPI 镜像 | `PIP_INDEX_URL` |
+
+如果某个源不可用，构建时用 `--build-arg` 替换即可，无需改文件：
+
+```sh
+docker compose -f docker-compose.sample.yml build \
+    --build-arg BASE_IMAGE=docker.1ms.run/library/python:3.13-slim-bookworm \
+    --build-arg APT_MIRROR=mirrors.aliyun.com \
+    --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+    api
+docker compose -f docker-compose.sample.yml up -d
+```
+
+可选的镜像源（任选其一组合）：
+
+| 用途 | 候选 |
+| --- | --- |
+| `BASE_IMAGE` | `docker.m.daocloud.io/library/python:3.13-slim-bookworm`、`docker.1ms.run/library/python:3.13-slim-bookworm`、`dockerproxy.net/library/python:3.13-slim-bookworm` |
+| `APT_MIRROR` | `mirrors.ustc.edu.cn`、`mirrors.aliyun.com`、`mirrors.tuna.tsinghua.edu.cn` |
+| `PIP_INDEX_URL` | `https://pypi.tuna.tsinghua.edu.cn/simple`、`https://mirrors.aliyun.com/pypi/simple/`、`https://mirrors.cloud.tencent.com/pypi/simple` |
+
+**方式 B（可选）：配置 Docker 全局镜像加速器**
+
+除了构建参数，也可以给 Docker 本身配加速器，让 `docker pull`（如 `groonga/pgroonga`、`redis`）也走国内源：
+
+```sh
+sudo tee /etc/docker/daemon.json <<'EOF'
+{
+  "registry-mirrors": [
+    "https://docker.m.daocloud.io",
+    "https://docker.1ms.run"
+  ]
+}
+EOF
+sudo systemctl restart docker
+```
+
+> 注意：`pg-fgoapicn` 与 `redis` 镜像若已拉取成功则无需处理。
 
 ## 1. 获取项目
 

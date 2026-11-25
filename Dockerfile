@@ -1,16 +1,37 @@
-# syntax=docker/dockerfile:1
-
 # FGO game data API image.
 # Requires the gamedata repo (e.g. fgo-game-data CN branch) to be mounted at
 # /data/fgo-game-data-cn and a config file at /app/config.json (see config.docker.json).
 
-FROM python:3.13-slim-bookworm
+# ---------------------------------------------------------------------------
+# All download sources are pointed at China mirrors because docker.io /
+# deb.debian.org / pypi.org may be blocked (403/timeout) in some networks.
+# Override any of them at build time, e.g.:
+#   docker compose build --build-arg BASE_IMAGE=docker.1ms.run/library/python:3.13-slim-bookworm api
+# ---------------------------------------------------------------------------
+
+# Base image: DaoCloud mirror of docker.io
+ARG BASE_IMAGE=docker.m.daocloud.io/library/python:3.13-slim-bookworm
+FROM ${BASE_IMAGE}
+
+# Debian apt mirror: USTC mirror of deb.debian.org (bookworm)
+ARG APT_MIRROR=mirrors.ustc.edu.cn
+# PyPI index: Tsinghua TUNA mirror
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
     # psycopg needs libpq at runtime
     PYTHONPATH=/app
+
+# Switch debian sources to the USTC mirror (handles both deb822 .sources
+# format on bookworm and legacy sources.list)
+RUN set -eux; \
+    if [ -d /etc/apt/sources.list.d ]; then \
+        sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    fi; \
+    sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true
 
 # git is required:
 # - app/config.py get_repo_info() reads the api repo's git metadata (used by /info and openapi)

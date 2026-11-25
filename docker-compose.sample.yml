@@ -12,6 +12,14 @@
 # To update gamedata later, call the webhook endpoint:
 #   curl -X POST http://localhost:8000/<github_webhook_secret>/update \
 #        -H "Content-Type: application/json" -d '{"ref": "refs/heads/CN"}'
+#
+# All build-time download sources (base image / apt / pip) already point at
+# China mirrors inside the Dockerfile. To override any of them:
+#   docker compose build \
+#     --build-arg BASE_IMAGE=docker.1ms.run/library/python:3.13-slim-bookworm \
+#     --build-arg APT_MIRROR=mirrors.aliyun.com \
+#     --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+#     api
 
 services:
   pg-fgoapicn:
