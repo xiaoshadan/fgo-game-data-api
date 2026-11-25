@@ -53,6 +53,7 @@ COPY app ./app
 COPY export ./export
 COPY fgo_api_types ./fgo_api_types
 COPY pyproject.toml ./
+COPY gunicorn.conf.py ./
 
 # The api repo itself must be a git repository for get_app_info() to work.
 # The commit hash is baked into the image via build args.
