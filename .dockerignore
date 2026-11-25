@@ -1,0 +1,26 @@
+# Files not needed inside the api image
+.git/
+.github/
+.vscode/
+.idea/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local config and secrets (mounted at runtime instead)
+config.json
+docker-compose.yml
+secrets/
+
+# Dev files
+tests/
+scripts/
+poetry.lock
+*.md
+!README.md
+LICENSE

@@ -1,0 +1,25 @@
+{
+  "data": {
+    "CN": {
+      "gamedata": "/data/fgo-game-data-cn",
+      "postgresdsn": "postgresql://user:password@pg-fgoapicn:5432/fgoapicn"
+    }
+  },
+  "redisdsn": "redis://redis:6379/0",
+  "redis_prefix": "fgoapi",
+  "clear_redis_cache": true,
+  "rayshift_api_key": "",
+  "rayshift_api_url": "https://rayshift.io/api/v1",
+  "quest_cache_length": 3600,
+  "db_pool_size": 3,
+  "db_max_overflow": 10,
+  "write_postgres_data": true,
+  "write_redis_data": true,
+  "skip_script_fulltext": false,
+  "asset_url": "https://assets.atlasacademy.io/GameData",
+  "openapi_url": null,
+  "export_all_nice": false,
+  "documentation_all_nice": true,
+  "github_webhook_secret": "change-me-to-a-random-string",
+  "github_webhook_git_pull": true
+}

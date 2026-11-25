@@ -1,65 +1,79 @@
-version: "3.9"
+# Docker compose for a self-hosted CN-only FGO game data API.
+#
+# Usage:
+#   cp config.docker.json config.json   # then edit secrets if needed
+#   docker compose up -d --build
+#
+# The api container:
+#   - waits for postgres/redis to be ready
+#   - clones the CN gamedata repo into the gamedata volume on first run
+#   - (with AUTO_UPDATE_ON_START=1) triggers the initial data import
+#
+# To update gamedata later, call the webhook endpoint:
+#   curl -X POST http://localhost:8000/<github_webhook_secret>/update \
+#        -H "Content-Type: application/json" -d '{"ref": "refs/heads/CN"}'
+
 services:
-  pg-fgoapijp:
-    image: groonga/pgroonga:latest-alpine-14-slim
-    ports:
-      - "5433:5432"
-    environment:
-      POSTGRES_DB: fgoapijp
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-    volumes:
-      - pg-jp-data:/var/lib/postgresql/data
-  pg-fgoapina:
-    image: groonga/pgroonga:latest-alpine-14-slim
-    ports:
-      - "5434:5432"
-    environment:
-      POSTGRES_DB: fgoapina
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-    volumes:
-      - pg-na-data:/var/lib/postgresql/data
   pg-fgoapicn:
     image: groonga/pgroonga:latest-alpine-14-slim
-    ports:
-      - "5435:5432"
+    restart: unless-stopped
     environment:
       POSTGRES_DB: fgoapicn
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
     volumes:
       - pg-cn-data:/var/lib/postgresql/data
-  pg-fgoapikr:
-    image: groonga/pgroonga:latest-alpine-14-slim
-    ports:
-      - "5436:5432"
-    environment:
-      POSTGRES_DB: fgoapikr
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-    volumes:
-      - pg-kr-data:/var/lib/postgresql/data
-  pg-fgoapitw:
-    image: groonga/pgroonga:latest-alpine-14-slim
-    ports:
-      - "5437:5432"
-    environment:
-      POSTGRES_DB: fgoapitw
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-    volumes:
-      - pg-tw-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d fgoapicn"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   redis:
     image: redis:alpine
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fgo-game-data-api:local
+    restart: unless-stopped
+    depends_on:
+      pg-fgoapicn:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      # Trigger the initial data import right after boot (needs
+      # github_webhook_secret set in config.json)
+      AUTO_UPDATE_ON_START: "1"
+      PORT: "8000"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - gamedata-cn:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import httpx,sys; sys.exit(0 if httpx.get('http://127.0.0.1:8000/', follow_redirects=False, timeout=5).status_code in (200,307) else 1)\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # Data import on first boot can take a long time
+      start_period: 120s
+
 volumes:
-  pg-jp-data:
-  pg-na-data:
   pg-cn-data:
-  pg-kr-data:
-  pg-tw-data:
   redis-data:
+  gamedata-cn:

@@ -9,6 +9,7 @@ If you are looking for only the type definitions and enums. You can download the
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
   - [Secrets](#secrets)
+- [Docker deployment (CN)](#docker-deployment-cn) — see also the [Chinese deployment manual](DEPLOY_CN.md)
 - [Development environment set up](#development-environment-set-up)
 - [Run the API server](#run-the-api-server)
 - [Architecture](#architecture)
@@ -76,6 +77,48 @@ Settings at a higher level will override the settings at a lower level.
 3. `.env` file
 4. `config.json`
 </details>
+
+### Docker deployment (CN)
+
+Run a self-hosted CN-only API with one command. The API image is built locally with `docker build` (no CI workflow involved).
+
+```sh
+cp config.docker.json config.json
+# Edit config.json: change github_webhook_secret to a random string
+
+docker compose -f docker-compose.sample.yml up -d --build
+```
+
+What happens on first boot:
+
+1. Postgres (PGroonga) and Redis start with healthchecks.
+2. The `api` container waits for both, then clones the CN gamedata repo into the `gamedata-cn` volume.
+3. With `AUTO_UPDATE_ON_START=1` (default in the sample compose), the entrypoint calls the webhook update endpoint locally, which imports all data into Postgres/Redis. This can take a while on the first run.
+
+Files involved:
+
+- [`Dockerfile`](/Dockerfile): Python 3.13-slim image with git and libpq; the api repo's git metadata is baked in so `/info` and `/docs` work.
+- [`docker-entrypoint.sh`](/docker-entrypoint.sh): waits for dependencies, clones gamedata, optionally triggers the initial import.
+- [`gunicorn.conf.py`](/gunicorn.conf.py): gunicorn + uvicorn worker settings.
+- [`config.docker.json`](/config.docker.json): CN-only config with DSNs pointing at the compose service names.
+- [`docker-compose.sample.yml`](/docker-compose.sample.yml): postgres + redis + api services.
+
+Updating gamedata later (e.g. after upstream pushes new data):
+
+```sh
+curl -X POST http://localhost:8000/<github_webhook_secret>/update \
+     -H "Content-Type: application/json" \
+     -d '{"ref": "refs/heads/CN"}'
+```
+
+The endpoint does `git pull` on the gamedata repo (because `github_webhook_git_pull` is `true`) and re-imports the data in the background. You can also wire this URL to a GitHub webhook on your fork.
+
+Updating the API itself: pull the latest code and rebuild:
+
+```sh
+git pull
+docker compose -f docker-compose.sample.yml up -d --build api
+```
 
 ### Development environment set up
 
