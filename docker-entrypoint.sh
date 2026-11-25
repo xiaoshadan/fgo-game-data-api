@@ -1,8 +1,9 @@
 #!/bin/sh
 # Entrypoint for the FGO game data API container.
 # 1. Waits for postgres and redis to be reachable.
-# 2. Clones the gamedata repo (CN branch) on first run.
-# 3. Starts the API server; the first data import is triggered via the
+# 2. Ensures the pgroonga extension exists (needed by fulltext indexes).
+# 3. Clones the gamedata repo (CN branch) on first run.
+# 4. Starts the API server; the first data import is triggered via the
 #    update endpoint (or automatically with AUTO_UPDATE_ON_START=1).
 
 set -e
@@ -79,6 +80,17 @@ EOF
 
 if [ -n "$POSTGRES_DSN" ]; then
     wait_for_postgres "$POSTGRES_DSN"
+    # The pgroonga extension must exist before any table with a
+    # `USING pgroonga` index is created (app/db/load.py only creates it
+    # much later, in load_script_list). POSTGRES_USER is a superuser so
+    # this is allowed.
+    log "Ensuring pgroonga extension exists ..."
+    python -c "
+import psycopg
+with psycopg.connect('${POSTGRES_DSN}', autocommit=True) as conn:
+    conn.execute('CREATE EXTENSION IF NOT EXISTS pgroonga;')
+" || log "WARNING: failed to create pgroonga extension (may already exist or lack permissions)"
+    log "pgroonga extension ready."
 fi
 if [ -n "$REDIS_DSN" ]; then
     wait_for_redis "$REDIS_DSN"
