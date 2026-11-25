@@ -100,7 +100,7 @@ docker compose -f docker-compose.sample.yml up -d --build
 
 1. `pg-fgoapicn`（PGroonga Postgres）与 `redis` 启动并通过 healthcheck；
 2. `api` 容器等待两者就绪后，把 CN 分支 gamedata 克隆到 `gamedata-cn` 卷（`/data/fgo-game-data-cn`）；
-3. entrypoint 调用本机 webhook 端点触发首次数据导入（`AUTO_UPDATE_ON_START=1`）。
+3. `AUTO_UPDATE_ON_START=1` 时，entrypoint **直接用 python 执行数据导入**（先 `git pull` gamedata），导入完成后才启动 gunicorn 开放 8000 端口。
 
 观察导入进度：
 
@@ -108,7 +108,9 @@ docker compose -f docker-compose.sample.yml up -d --build
 docker compose -f docker-compose.sample.yml logs -f api
 ```
 
-看到 `Loaded game data in ...` / `Cleared ... cache redis keys` 即导入完成。首次导入通常需要 10~30 分钟（取决于磁盘与网络）。
+看到 `[entrypoint] Import finished in ...s` / `Cleared ... cache redis keys` 即导入完成。首次导入通常需要 10~30 分钟（取决于磁盘与网络）。
+
+> **导入期间 API 行为**：导入在 API 端口开放**之前**同步执行——期间 curl 会得到"连接拒绝"（端口未开），而不是挂起或 404。日志出现 `Data import done. Starting API server.` 后 API 才接受请求，此时数据已就绪。容器每次重启都会自动执行一次完整重导入，属正常现象；日常快速重启可设 `AUTO_UPDATE_ON_START=0`（要求库中已有数据，否则所有数据端点 404）。
 
 验证：
 

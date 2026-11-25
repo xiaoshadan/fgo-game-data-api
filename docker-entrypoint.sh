@@ -1,10 +1,17 @@
 #!/bin/sh
 # Entrypoint for the FGO game data API container.
+#
 # 1. Waits for postgres and redis to be reachable.
 # 2. Ensures the pgroonga extension exists (needed by fulltext indexes).
 # 3. Clones the gamedata repo (CN branch) on first run.
-# 4. Starts the API server; the first data import is triggered via the
-#    update endpoint (or automatically with AUTO_UPDATE_ON_START=1).
+# 4. With AUTO_UPDATE_ON_START=1: git-pulls gamedata and runs the data import
+#    DIRECTLY (python) BEFORE starting gunicorn. This way the API port is
+#    simply closed during the import instead of accepting requests that hang
+#    or 404 while tables are being rebuilt.
+# 5. Starts the API server (gunicorn).
+#
+# Runtime updates while the server is up still go through the webhook
+# endpoint: POST /<github_webhook_secret>/update
 
 set -e
 
@@ -14,7 +21,7 @@ GAMEDATA_REPO="${GAMEDATA_REPO:-https://git.atlasacademy.io/atlasacademy/fgo-gam
 GAMEDATA_BRANCH="${GAMEDATA_BRANCH:-CN}"
 
 log() {
-    echo "[entrypoint] $*"
+    echo "[entrypoint] $(date '+%Y-%m-%d %H:%M:%S') $*"
 }
 
 # ---------------------------------------------------------------------------
@@ -22,7 +29,7 @@ log() {
 # ---------------------------------------------------------------------------
 wait_for_postgres() {
     host="$1"
-    log "Waiting for postgres at ${host} ..."
+    log "Waiting for postgres ..."
     until python -c "
 import sys
 import psycopg
@@ -109,44 +116,51 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Start the server
+# 3. Run the data import BEFORE starting the server (AUTO_UPDATE_ON_START=1)
 # ---------------------------------------------------------------------------
-# AUTO_UPDATE_ON_START=1 triggers a data import right after boot by calling
-# the webhook update endpoint locally. Requires GITHUB_WEBHOOK_SECRET to be
-# set in config.json.
+# The import is executed synchronously here, so gunicorn (and the API port)
+# only comes up after the data is ready. No HTTP self-call, no event-loop
+# blocking, no half-loaded tables answering 404.
 if [ "${AUTO_UPDATE_ON_START:-0}" = "1" ]; then
-    (
-        # Wait for the API to accept connections, then trigger the import
-        sleep 10
-        secret=$(python - "$CONFIG_FILE" <<'EOF'
-import json
+    if [ -d "$GAMEDATA_DIR/.git" ]; then
+        log "Pulling latest gamedata ..."
+        git -C "$GAMEDATA_DIR" pull --ff-only || log "WARNING: git pull failed, using existing data"
+    fi
+
+    log "Starting data import (this can take several minutes) ..."
+    python - "$CONFIG_FILE" <<'EOF'
+import asyncio
 import sys
+import time
 
-with open(sys.argv[1], encoding="utf-8") as fp:
-    config = json.load(fp)
-print(config.get("github_webhook_secret", ""))
-EOF
-)
-        if [ -n "$secret" ]; then
-            log "Triggering initial data import ..."
-            python - <<EOF
-import httpx
+from app.config import Settings
+from app.db.engine import async_engines
+from app.redis import Redis
+from app.tasks import load_and_export
 
-try:
-    resp = httpx.post(
-        "http://127.0.0.1:${PORT:-8000}/${secret}/update",
-        json={"ref": "refs/heads/CN"},
-        timeout=30,
-    )
-    print(f"[entrypoint] update endpoint responded {resp.status_code}")
-except Exception as exc:
-    print(f"[entrypoint] failed to trigger update: {exc}")
+
+async def main() -> None:
+    settings = Settings()
+    redis = Redis.from_url(str(settings.redisdsn))
+    region_path = {region: data.gamedata for region, data in settings.data.items()}
+    start = time.perf_counter()
+    await load_and_export(redis, region_path, async_engines, False)
+    print(f"[entrypoint] Import finished in {time.perf_counter() - start:.1f}s")
+    try:
+        await redis.aclose()
+    except AttributeError:
+        await redis.close()
+
+
+asyncio.run(main())
 EOF
-        else
-            log "AUTO_UPDATE_ON_START=1 but github_webhook_secret is empty; skipping."
-        fi
-    ) &
+    log "Data import done. Starting API server."
+else
+    log "AUTO_UPDATE_ON_START != 1, skipping import. Starting API server directly."
+    log "NOTE: if the database is empty, all data endpoints will return 404."
 fi
 
-log "Starting API server ..."
+# ---------------------------------------------------------------------------
+# 4. Start the server
+# ---------------------------------------------------------------------------
 exec "$@"
