@@ -64,6 +64,12 @@ RUN git init -q \
     && git commit -qm "docker build ${GIT_COMMIT}" \
     && git tag -f build
 
+# entrypoint script; strip CRLF in case the repo was checked out on Windows
+# (must run as root: sed needs write access to /usr/local/bin)
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Non-root user
 RUN useradd --create-home --uid 1000 api \
     && mkdir -p /data /app/export \
@@ -74,11 +80,6 @@ USER api
 VOLUME ["/data"]
 
 EXPOSE 8000
-
-# entrypoint script; strip CRLF in case the repo was checked out on Windows
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
-    && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["gunicorn", "app.main:app", "-c", "gunicorn.conf.py"]
